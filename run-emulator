@@ -6,138 +6,172 @@ cd "$(dirname "$0")" || exit 1
 # Set ANDROID_SDK_ROOT to current directory if not set or invalid
 export ANDROID_SDK_ROOT="$(pwd)"
 
-
+CURRENT_DIR="$(pwd)"
 SDK_ROOT="$ANDROID_SDK_ROOT"
-EMULATOR="$SDK_ROOT/emulator/emulator"
-SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-AVDMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
-ADB="$SDK_ROOT/platform-tools/adb"
 
-AVD_NAME="androidAppInventor"
-SYSTEM_IMAGE_BASE="system-images;android-34;google_apis;arm64-v8a"  # Default desired image base
-APP_PATH="$SDK_ROOT/Companion.apk"  # <- Update with your APK path
+if [ -n "${EMULATOR+set}" ]; then
+    echo "Using custom EMULATOR path: $EMULATOR"
+else
+    echo "Using default SDK_ROOT for EMULATOR: $SDK_ROOT"
+    EMULATOR="$SDK_ROOT/emulator/emulator"
+fi
+if [ -n "${SDKMANAGER+set}" ]; then
+    echo "Using custom SDKMANAGER path: $SDKMANAGER"
+else
+    echo "Using default SDK_ROOT for SDKMANAGER: $SDK_ROOT"
+    SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+fi
+if [ -n "${AVDMANAGER+set}" ]; then
+    echo "Using custom AVDMANAGER path: $AVDMANAGER"
+else
+    echo "Using default SDK_ROOT for AVDMANAGER: $SDK_ROOT"
+    AVDMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
+fi
+if [ -n "${ADB+set}" ]; then
+    echo "Using custom ADB path: $ADB"
+else
+    echo "Using default SDK_ROOT for ADB: $SDK_ROOT"
+    ADB="$SDK_ROOT/platform-tools/adb"
+fi
+
+if [ -n "${AVD_NAME+set}" ]; then
+	echo "AVD_NAME SET"
+else
+	AVD_NAME="androidAppInventor"
+fi
+
+SYSTEM_IMAGE_BASE="system-images;android-34;google_apis;arm64-v8a" # Default desired image base
+
+if [ -n "${INSTALL_APP+set}" ]; then
+  if [ -n "${APP_PATH+set}" ]; then
+    echo "APP_PATH is set to $APP_PATH"
+  else
+    echo "INSTALL_APP is set but APP_PATH is not set. Using default path Companion.apk in SDK root."
+      APP_PATH="$CURRENT_DIR/Companion.apk"                                 # <- Update with your APK path
+  fi
+fi
 
 # Helper: Extract API level from system image string (cross-platform sed)
 extract_api_level() {
-  if sed --version >/dev/null 2>&1; then
-    # GNU sed
-    echo "$1" | sed -n 's/.*android-\([0-9]\+\).*/\1/p'
-  else
-    # BSD sed (macOS)
-    echo "$1" | sed -n 's/.*android-\([0-9]\{1,\}\).*/\1/p'
-  fi
+	if sed --version >/dev/null 2>&1; then
+		# GNU sed
+		echo "$1" | sed -n 's/.*android-\([0-9]\+\).*/\1/p'
+	else
+		# BSD sed (macOS)
+		echo "$1" | sed -n 's/.*android-\([0-9]\{1,\}\).*/\1/p'
+	fi
 }
 
 # List installed android system images matching base pattern
 list_installed_images() {
-  "$SDKMANAGER" --list_installed | grep "^system-images;android-"
+	"$SDKMANAGER" --list_installed | grep "^system-images;android-"
 }
 
 # List available system images from remote repository
 list_available_images() {
-  "$SDKMANAGER" --list | grep "^system-images;android-"
+	"$SDKMANAGER" --list | grep "^system-images;android-"
 }
 
 update_system_image() {
-  echo "Checking installed system images..."
+	echo "Checking installed system images..."
 
-  installed_versions=$(list_installed_images | awk -F';' '{print $2}' | sort -nr)
+	installed_versions=$(list_installed_images | awk -F';' '{print $2}' | sort -nr)
 
-  desired_api_level=$(extract_api_level "$SYSTEM_IMAGE_BASE")
-  echo "Extracted desired_api_level=$desired_api_level"
+	desired_api_level=$(extract_api_level "$SYSTEM_IMAGE_BASE")
+	echo "Extracted desired_api_level=$desired_api_level"
 
-  if [ -z "$desired_api_level" ]; then
-    echo "Error: Could not extract API level from SYSTEM_IMAGE_BASE=$SYSTEM_IMAGE_BASE"
-    exit 1
-  fi
+	if [ -z "$desired_api_level" ]; then
+		echo "Error: Could not extract API level from SYSTEM_IMAGE_BASE=$SYSTEM_IMAGE_BASE"
+		exit 1
+	fi
 
-  latest_api_level=$desired_api_level
+	latest_api_level=$desired_api_level
 
-  available_images=$(list_available_images)
-  latest_api_level_candidate=$(echo "$available_images" | awk -F';' '{print $2}' | \
-    sed -n 's/android-\([0-9]\{1,\}\)/\1/p' | sort -nr | head -n1)
+	available_images=$(list_available_images)
+	latest_api_level_candidate=$(echo "$available_images" | awk -F';' '{print $2}' |
+		sed -n 's/android-\([0-9]\{1,\}\)/\1/p' | sort -nr | head -n1)
 
-  if [ -n "$latest_api_level_candidate" ] && [ "$latest_api_level_candidate" -gt "$desired_api_level" ]; then
-    latest_api_level=$latest_api_level_candidate
-  fi
+	if [ -n "$latest_api_level_candidate" ] && [ "$latest_api_level_candidate" -gt "$desired_api_level" ]; then
+		latest_api_level=$latest_api_level_candidate
+	fi
 
-  latest_system_image="system-images;android-$latest_api_level;google_apis;arm64-v8a"
+	latest_system_image="system-images;android-$latest_api_level;google_apis;arm64-v8a"
 
-  if echo "$installed_versions" | grep -q "^$latest_api_level$"; then
-    echo "Latest system image android-$latest_api_level is already installed."
-  else
-    for api_level in $installed_versions; do
-      if [ "$api_level" -lt "$latest_api_level" ]; then
-        echo "Uninstalling older system image android-$api_level"
-        yes | "$SDKMANAGER" --uninstall "system-images;android-$api_level;google_apis;arm64-v8a"
-      fi
-    done
+	if echo "$installed_versions" | grep -q "^$latest_api_level$"; then
+		echo "Latest system image android-$latest_api_level is already installed."
+	else
+		for api_level in $installed_versions; do
+			if [ "$api_level" -lt "$latest_api_level" ]; then
+				echo "Uninstalling older system image android-$api_level"
+				yes | "$SDKMANAGER" --uninstall "system-images;android-$api_level;google_apis;arm64-v8a"
+			fi
+		done
 
-    echo "Installing latest system image: $latest_system_image"
-    yes | "$SDKMANAGER" "$latest_system_image"
-  fi
+		echo "Installing latest system image: $latest_system_image"
+		yes | "$SDKMANAGER" "$latest_system_image"
+	fi
 
-  SYSTEM_IMAGE_BASE="$latest_system_image"
+	SYSTEM_IMAGE_BASE="$latest_system_image"
 }
 
 # Check if AVD exists
 avd_exists() {
-  [ -d "${HOME}/.android/avd/${AVD_NAME}.avd" ]
+	[ -d "${HOME}/.android/avd/${AVD_NAME}.avd" ]
 }
 
 # Get system image currently used by AVD
 avd_image_api_level() {
-  if avd_exists; then
-    grep "image.sysdir.1" "${HOME}/.android/avd/${AVD_NAME}.ini" | sed 's/.*android-\([0-9]\{1,\}\).*/\1/'
-  else
-    echo ""
-  fi
+	if avd_exists; then
+		grep "image.sysdir.1" "${HOME}/.android/avd/${AVD_NAME}.ini" | sed 's/.*android-\([0-9]\{1,\}\).*/\1/'
+	else
+		echo ""
+	fi
 }
 
 # Delete AVD
 delete_avd() {
-  echo "Deleting old AVD: $AVD_NAME"
-  yes | "$AVDMANAGER" delete avd -n "$AVD_NAME"
+	echo "Deleting old AVD: $AVD_NAME"
+	yes | "$AVDMANAGER" delete avd -n "$AVD_NAME"
 }
 
 # Create AVD
 create_avd() {
-  echo "Creating AVD $AVD_NAME with system image $SYSTEM_IMAGE_BASE"
-  echo "no" | "$AVDMANAGER" create avd -n "$AVD_NAME" -k "$SYSTEM_IMAGE_BASE" -d pixel_6
+	echo "Creating AVD $AVD_NAME with system image $SYSTEM_IMAGE_BASE"
+	echo "no" | "$AVDMANAGER" create avd -n "$AVD_NAME" -k "$SYSTEM_IMAGE_BASE" -d pixel_6
 }
 
 # Update SDK components
 update_sdk_components() {
-  echo "Updating SDK components..."
-  yes | "$SDKMANAGER" --update
+	echo "Updating SDK components..."
+	yes | "$SDKMANAGER" --update
 }
 
 # Check if app installed on emulator/device
 app_installed() {
-  "$ADB" shell pm list packages | grep -q "edu.mit.appinventor.aicompanion3"
+	"$ADB" shell pm list packages | grep -q "edu.mit.appinventor.aicompanion3"
 }
 
 # Install app
 install_app() {
-  echo "Installing MIT App Inventor Companion app..."
-  "$ADB" install -r "$APP_PATH"
+	echo "Installing MIT App Inventor Companion app..."
+	"$ADB" install -r "$APP_PATH"
 }
 
 # Start emulator and wait for boot
 start_emulator() {
-  echo "Starting emulator..."
-  "$EMULATOR" -avd "$AVD_NAME" -netdelay none -netspeed full -no-snapshot-load &
-  EMULATOR_PID=$!
+	echo "Starting emulator..."
+	"$EMULATOR" -avd "$AVD_NAME" -netdelay none -netspeed full -no-snapshot-load &
+	EMULATOR_PID=$!
 
-  echo "Waiting for emulator to boot..."
-  "$ADB" wait-for-device
+	echo "Waiting for emulator to boot..."
+	"$ADB" wait-for-device
 
-  boot_completed=""
-  until [ "$boot_completed" = "1" ]; do
-    boot_completed=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-    sleep 1
-  done
-  echo "Emulator booted."
+	boot_completed=""
+	until [ "$boot_completed" = "1" ]; do
+		boot_completed=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+		sleep 1
+	done
+	echo "Emulator booted."
 }
 
 # === MAIN ===
@@ -146,27 +180,32 @@ update_sdk_components
 update_system_image
 
 if avd_exists; then
-  current_api=$(avd_image_api_level)
-  desired_api=$(extract_api_level "$SYSTEM_IMAGE_BASE")
+	current_api=$(avd_image_api_level)
+	desired_api=$(extract_api_level "$SYSTEM_IMAGE_BASE")
 
-  if [ "$current_api" != "$desired_api" ]; then
-    echo "AVD $AVD_NAME is outdated (API $current_api != $desired_api). Recreating..."
-    delete_avd
-    create_avd
-  else
-    echo "AVD $AVD_NAME is up to date with API $current_api."
-  fi
+	if [ "$current_api" != "$desired_api" ]; then
+		echo "AVD $AVD_NAME is outdated (API $current_api != $desired_api). Recreating..."
+		delete_avd
+		create_avd
+	else
+		echo "AVD $AVD_NAME is up to date with API $current_api."
+	fi
 else
-  echo "AVD $AVD_NAME does not exist. Creating..."
-  create_avd
+	echo "AVD $AVD_NAME does not exist. Creating..."
+	create_avd
 fi
 
 start_emulator
 
 if ! app_installed; then
-  install_app
+	if [ -n "${INSTALL_APP+set}" ]; then
+		echo "INSTALL_APP is set, thus installing the app."
+		install_app
+	else
+		echo "INSTALL_APP is not set."
+	fi
 else
-  echo "MIT App Inventor Companion app is already installed."
+	echo "MIT App Inventor Companion app is already installed."
 fi
 
 echo "Setup complete."
